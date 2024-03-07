@@ -4,13 +4,14 @@ const uuid = require('uuid');
 const mailService = require('./mail-service');
 const tokenService = require('./token-service');
 const UserDto = require('../dtos/user-dto');
+const ApiError = require('../errors/api-error');
 
 class UserService {
   async register(email, password) {
     const candidate = await UserModel.findOne({ email });
 
     if (candidate) {
-      throw new Error(`Пользователь с email ${email} уже существует`);
+      throw ApiError.BadRequest(`Пользователь с email ${email} уже существует`);
     }
 
     const hashedPassword = await bcrypt.hash(password, 3);
@@ -42,10 +43,31 @@ class UserService {
   async activate(activationLink) {
     const user = await UserModel.findOne({ activationLink });
     if (!user) {
-      throw new Error('Некорректная ссылка активации');
+      throw ApiError.BadRequest('Некорректная ссылка активации');
     }
     user.isActivated = true;
-    await user.save()
+    await user.save();
+  }
+
+  async login(email, password) {
+    const user = await UserModel.findOne({ email });
+    if (!user) {
+      throw ApiError.BadRequest(`Пользователь с email ${email} не найден`);
+    }
+
+    // сравниваем пароли
+    const isPasswordEquals = await bcrypt.compare(password, user.password);
+    if (!isPasswordEquals) {
+      throw ApiError.BadRequest('Неверный пароль');
+    }
+    const userDto = new UserDto(user);
+    const tokens = tokenService.generateTokens({ ...userDto });
+    await tokenService.saveToken(userDto.id, tokens.refreshToken);
+
+    return {
+      ...tokens,
+      user: userDto,
+    };
   }
 }
 
